@@ -85,10 +85,17 @@ abstract class MemoryDao {
     @Query("SELECT * FROM transcript_lines WHERE id IN (:ids) ORDER BY startAt, id")
     abstract suspend fun refreshLines(ids: List<Long>): List<TranscriptLineEntity>
 
-    /** 某时间范围内还没转写完的录音段数（会补进来的，整理要等它们） */
+    /**
+     * 某时间范围内还没转写完的录音段数（会补进来的，整理要等它们）。
+     * 只统计 Pending / Running：这两类段未来还会产出新句子，整理必须等它们。
+     * 已 Failed 的段不再算"未完成"——它要么已是死段（转写彻底失败），要么由转写调度自己按
+     * attempts<5 退避重试；若将来重试成功，undigestedLines 会在下一轮把它纳入整理。
+     * 不把 Failed 算进来，可避免一段"总是失败"的坏录音在 attempts<5 期间横跨时间窗口、
+     * 永久阻塞其前后所有段落的模型整理（直到 attempts 攒满 5 才放行）。
+     */
     @Query(
         """SELECT COUNT(*) FROM segments WHERE endAt > :start AND startAt < :end
-           AND (status IN ('Pending', 'Running') OR (status = 'Failed' AND attempts < 5))""",
+           AND status IN ('Pending', 'Running')""",
     )
     abstract suspend fun unfinishedSegments(start: Long, end: Long): Int
 
